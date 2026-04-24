@@ -200,6 +200,9 @@ class ApplicationListCreateView(generics.ListCreateAPIView):
             queryset = queryset.filter(job_id=job_id)
         return queryset
 
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "request": self.request}
+
     def perform_create(self, serializer):
         applicant = self.request.user
         full_name = " ".join(
