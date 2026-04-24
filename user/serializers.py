@@ -14,9 +14,12 @@ class MessageSerializer(serializers.ModelSerializer):
 
 
 class NotificationSerializer(serializers.ModelSerializer):
+    sender_name  = serializers.CharField(source="sender.username", read_only=True, default=None)
+    sender_email = serializers.EmailField(source="sender.email", read_only=True, default=None)
+
     class Meta:
         model = Notification
-        fields = ["id", "title", "message", "is_read", "created_at"]
+        fields = ["id", "title", "message", "is_read", "created_at", "sender_name", "sender_email"]
         read_only_fields = ["id", "created_at"]
 
 
@@ -211,13 +214,20 @@ class ApplicationSerializer(serializers.ModelSerializer):
     location = serializers.CharField(source="job.location", read_only=True)
     salary = serializers.CharField(source="job.salary", read_only=True)
     job_type = serializers.CharField(source="job.job_type", read_only=True)
+    resume_url = serializers.SerializerMethodField()
+    full_name = serializers.CharField(required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    phone = serializers.CharField(required=False, allow_blank=True)
+    address = serializers.CharField(required=False, allow_blank=True)
+    cover_letter = serializers.CharField(required=True, allow_blank=False)
+    experience = serializers.CharField(required=True, allow_blank=False)
 
     class Meta:
         model = Application
         fields = [
             "id", "user", "job", "job_title", "company", "location",
             "salary", "job_type", "full_name", "email", "phone", "address",
-            "cover_letter", "experience", "status", "created_at", "updated_at",
+            "cover_letter", "experience", "resume", "resume_url", "status", "cancel_reason", "created_at", "updated_at",
         ]
         read_only_fields = ["user", "created_at", "updated_at"]
 
@@ -225,7 +235,20 @@ class ApplicationSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = getattr(request, "user", None)
         job = data.get("job")
+        if not str(data.get("cover_letter", "")).strip():
+            raise serializers.ValidationError({"cover_letter": "This field is required."})
+        if not str(data.get("experience", "")).strip():
+            raise serializers.ValidationError({"experience": "This field is required."})
+
         if request and request.method == "POST" and user and job:
             if Application.objects.filter(user=user, job=job).exists():
                 raise serializers.ValidationError({"job": "You have already applied to this job."})
         return data
+
+    def get_resume_url(self, obj):
+        request = self.context.get("request")
+        if not obj.resume:
+            return ""
+        if request:
+            return request.build_absolute_uri(obj.resume.url)
+        return obj.resume.url

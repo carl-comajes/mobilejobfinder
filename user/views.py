@@ -16,15 +16,15 @@ from .serializers import (
 )
 
 
-def _notify(recipient, title, message):
+def _notify(recipient, title, message, sender=None):
     """Create a notification for a single user."""
-    Notification.objects.create(recipient=recipient, title=title, message=message)
+    Notification.objects.create(recipient=recipient, title=title, message=message, sender=sender)
 
 
-def _notify_all_staff(title, message):
+def _notify_all_staff(title, message, sender=None):
     """Send a notification to every staff (admin) user."""
     for admin in CustomUser.objects.filter(is_staff=True):
-        _notify(admin, title, message)
+        _notify(admin, title, message, sender=sender)
 
 
 class CountryListView(generics.ListAPIView):
@@ -191,6 +191,7 @@ class AdminJobDetailView(generics.RetrieveUpdateDestroyAPIView):
 class ApplicationListCreateView(generics.ListCreateAPIView):
     serializer_class = ApplicationSerializer
     permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
 
     def get_queryset(self):
         queryset = Application.objects.filter(user=self.request.user)
@@ -200,9 +201,23 @@ class ApplicationListCreateView(generics.ListCreateAPIView):
         return queryset
 
     def perform_create(self, serializer):
-        application = serializer.save(user=self.request.user)
-        job = application.job
         applicant = self.request.user
+        full_name = " ".join(
+            part for part in [
+                getattr(applicant, "first_name", "") or "",
+                getattr(applicant, "last_name", "") or "",
+            ]
+            if part
+        ).strip() or applicant.username or applicant.email
+
+        application = serializer.save(
+            user=applicant,
+            full_name=full_name,
+            email=applicant.email,
+            phone=getattr(applicant, "contact", "") or "",
+            address=getattr(applicant, "address", "") or "",
+        )
+        job = application.job
 
         # Notify the job's recruiter/creator
         if job.created_by:
@@ -210,12 +225,14 @@ class ApplicationListCreateView(generics.ListCreateAPIView):
                 job.created_by,
                 "New Application Received",
                 f"{applicant.first_name or applicant.username} applied for '{job.title}' at {job.company}.",
+                sender=applicant,
             )
 
         # Notify all admins
         _notify_all_staff(
             "New Job Application",
             f"{applicant.first_name or applicant.username} applied for '{job.title}' at {job.company}.",
+            sender=applicant,
         )
 
 
@@ -239,6 +256,44 @@ class ApplicationDetailView(generics.RetrieveUpdateAPIView):
                 "Application Status Updated",
                 f"Your application for '{application.job.title}' at {application.job.company} is now: {new_status}.",
             )
+
+
+class CancelApplicationView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            application = Application.objects.get(pk=pk, user=request.user)
+        except Application.DoesNotExist:
+            return Response({"error": "Application not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if application.status == "Cancelled":
+            return Response({"error": "Already cancelled."}, status=status.HTTP_400_BAD_REQUEST)
+
+        reason = request.data.get("reason", "").strip()
+        if not reason:
+            return Response({"error": "A cancellation reason is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        application.status = "Cancelled"
+        application.cancel_reason = reason
+        application.save()
+
+        applicant = request.user
+        job = application.job
+        title = "Application Cancelled"
+        message = (
+            f"{applicant.first_name or applicant.username} cancelled their application "
+            f"for '{job.title}' at {job.company}.\n\nReason: {reason}"
+        )
+
+        # Notify recruiter
+        if job.created_by:
+            _notify(job.created_by, title, message, sender=applicant)
+
+        # Notify all admins
+        _notify_all_staff(title, message, sender=applicant)
+
+        return Response(ApplicationSerializer(application).data)
 
 
 class AdminApplicationListView(generics.ListAPIView):
@@ -276,6 +331,33 @@ class AdminApplicationStatusView(APIView):
         )
 
         return Response(ApplicationSerializer(application).data)
+
+
+class NotificationReplyView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            notification = Notification.objects.get(pk=pk)
+        except Notification.DoesNotExist:
+            return Response({"error": "Notification not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not (request.user.is_staff or request.user.is_recruiter):
+            return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+
+        message_text = request.data.get("message", "").strip()
+        if not message_text:
+            return Response({"error": "Message is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Reply goes to the original sender of the notification (the user who cancelled)
+        reply_recipient = notification.sender if notification.sender else notification.recipient
+        _notify(
+            reply_recipient,
+            f"Reply from {request.user.first_name or request.user.username}",
+            message_text,
+            sender=request.user,
+        )
+        return Response({"detail": "Reply sent."})
 
 
 class AdminUserListView(generics.ListCreateAPIView):

@@ -171,6 +171,7 @@ class Message(models.Model):
 
 class Notification(models.Model):
     recipient   = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="notifications")
+    sender      = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name="sent_notifications")
     title       = models.CharField(max_length=200)
     message     = models.TextField()
     is_read     = models.BooleanField(default=False)
@@ -190,6 +191,7 @@ class Application(models.Model):
         ("Interview", "Interview"),
         ("Rejected", "Rejected"),
         ("Hired", "Hired"),
+        ("Cancelled", "Cancelled"),
     ]
 
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="applications")
@@ -200,7 +202,9 @@ class Application(models.Model):
     address = models.TextField()
     cover_letter = models.TextField()
     experience = models.TextField()
+    resume = models.FileField(upload_to="application_resumes/", blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Submitted")
+    cancel_reason = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
