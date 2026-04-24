@@ -198,8 +198,14 @@ class UserProfileSerializer(serializers.ModelSerializer):
         if not obj.resume:
             return ""
         if request:
-            return request.build_absolute_uri(obj.resume.url)
-        return obj.resume.url
+            return request.build_absolute_uri(self._resume_url(obj.resume.url))
+        return self._resume_url(obj.resume.url)
+
+    @staticmethod
+    def _resume_url(url: str) -> str:
+        if "/image/upload/" in url:
+            return url.replace("/image/upload/", "/raw/upload/")
+        return url
 
 
 class CountrySerializer(serializers.ModelSerializer):
@@ -251,5 +257,11 @@ class ApplicationSerializer(serializers.ModelSerializer):
             return ""
         request = self.context.get("request")
         if request:
-            return request.build_absolute_uri(obj.resume.url)
-        return obj.resume.url
+            return request.build_absolute_uri(self._resume_url(obj.resume.url))
+        return self._resume_url(obj.resume.url)
+
+    @staticmethod
+    def _resume_url(url: str) -> str:
+        if "/image/upload/" in url:
+            return url.replace("/image/upload/", "/raw/upload/")
+        return url

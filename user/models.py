@@ -1,5 +1,6 @@
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
+from cloudinary_storage.storage import RawMediaCloudinaryStorage
 
 # Custom User Manager
 class CustomUserManager(BaseUserManager):
@@ -147,7 +148,7 @@ class UserProfile(models.Model):
     portfolio_url = models.URLField(blank=True)
     linkedin_url = models.URLField(blank=True)
     profile_picture = models.FileField(upload_to="profile_pictures/", blank=True, null=True)
-    resume = models.FileField(upload_to="resumes/", blank=True, null=True)
+    resume = models.FileField(upload_to="resumes/", storage=RawMediaCloudinaryStorage(), blank=True, null=True)
     is_complete = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -202,7 +203,7 @@ class Application(models.Model):
     address = models.TextField()
     cover_letter = models.TextField()
     experience = models.TextField()
-    resume = models.FileField(upload_to="application_resumes/", blank=True, null=True)
+    resume = models.FileField(upload_to="application_resumes/", storage=RawMediaCloudinaryStorage(), blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Submitted")
     cancel_reason = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
