@@ -307,13 +307,16 @@ class AdminApplicationListView(generics.ListAPIView):
             queryset = queryset.filter(job_id=job_id)
         return queryset
 
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "request": self.request}
+
 
 class AdminApplicationStatusView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def patch(self, request, pk):
         try:
-            application = Application.objects.get(pk=pk)
+            application = Application.objects.select_related("job", "user").get(pk=pk)
         except Application.DoesNotExist:
             return Response({"error": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         new_status = request.data.get("status")
@@ -323,14 +326,49 @@ class AdminApplicationStatusView(APIView):
         application.status = new_status
         application.save()
 
-        # Notify the applicant about their status change
         _notify(
             application.user,
             "Application Status Updated",
             f"Your application for '{application.job.title}' at {application.job.company} is now: {new_status}.",
         )
 
-        return Response(ApplicationSerializer(application).data)
+        return Response(ApplicationSerializer(application, context={"request": request}).data)
+
+
+class RecruiterApplicationStatusView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, pk):
+        user = request.user
+        if not (user.is_recruiter or user.is_staff):
+            return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            if user.is_staff:
+                application = Application.objects.select_related("job", "user").get(pk=pk)
+            else:
+                application = Application.objects.select_related("job", "user").get(pk=pk, job__created_by=user)
+        except Application.DoesNotExist:
+            return Response({"error": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        new_status = request.data.get("status")
+        valid = [s[0] for s in Application.STATUS_CHOICES]
+        if new_status not in valid:
+            return Response({"error": f"Invalid status. Choose from {valid}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        old_status = application.status
+        application.status = new_status
+        application.save()
+
+        if new_status != old_status:
+            _notify(
+                application.user,
+                "Application Status Updated",
+                f"Your application for '{application.job.title}' at {application.job.company} is now: {new_status}.",
+                sender=user,
+            )
+
+        return Response(ApplicationSerializer(application, context={"request": request}).data)
 
 
 class NotificationReplyView(APIView):
@@ -385,6 +423,7 @@ class AdminStatsView(APIView):
             "interview": Application.objects.filter(status="Interview").count(),
             "rejected": Application.objects.filter(status="Rejected").count(),
             "submitted": Application.objects.filter(status="Submitted").count(),
+            "cancelled": Application.objects.filter(status="Cancelled").count(),
         })
 
 
@@ -404,6 +443,9 @@ class RecruiterApplicationListView(generics.ListAPIView):
         return Application.objects.filter(
             job__created_by=self.request.user
         ).select_related('job').order_by('-created_at')
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "request": self.request}
 
 
 class AdminRecruiterListCreateView(generics.ListCreateAPIView):

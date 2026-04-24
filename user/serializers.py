@@ -219,8 +219,8 @@ class ApplicationSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(required=False, allow_blank=True)
     phone = serializers.CharField(required=False, allow_blank=True)
     address = serializers.CharField(required=False, allow_blank=True)
-    cover_letter = serializers.CharField(required=True, allow_blank=False)
-    experience = serializers.CharField(required=True, allow_blank=False)
+    cover_letter = serializers.CharField(required=False, allow_blank=True)
+    experience = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = Application
@@ -235,10 +235,11 @@ class ApplicationSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = getattr(request, "user", None)
         job = data.get("job")
-        if not str(data.get("cover_letter", "")).strip():
-            raise serializers.ValidationError({"cover_letter": "This field is required."})
-        if not str(data.get("experience", "")).strip():
-            raise serializers.ValidationError({"experience": "This field is required."})
+        if request and request.method == "POST":
+            if not str(data.get("cover_letter", "")).strip():
+                raise serializers.ValidationError({"cover_letter": "This field is required."})
+            if not str(data.get("experience", "")).strip():
+                raise serializers.ValidationError({"experience": "This field is required."})
 
         if request and request.method == "POST" and user and job:
             if Application.objects.filter(user=user, job=job).exists():
@@ -246,9 +247,9 @@ class ApplicationSerializer(serializers.ModelSerializer):
         return data
 
     def get_resume_url(self, obj):
-        request = self.context.get("request")
         if not obj.resume:
             return ""
+        request = self.context.get("request")
         if request:
             return request.build_absolute_uri(obj.resume.url)
         return obj.resume.url
