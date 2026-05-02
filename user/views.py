@@ -691,11 +691,20 @@ class ForgotPasswordView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        email = request.data.get('email', '').strip()
         try:
+            email = request.data.get('email', '').strip()
+            if not email:
+                return Response({'error': 'Please enter your email.'}, status=status.HTTP_400_BAD_REQUEST)
             user = CustomUser.objects.get(email=email)
         except CustomUser.DoesNotExist:
             return Response({'error': 'No account found with that email.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as exc:
+            return Response(
+                {
+                    'error': f'Forgot password could not start because the backend hit an error: {exc}',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         otp = _create_otp(user, PasswordResetOTP.PURPOSE_PASSWORD_RESET)
         try:
@@ -795,13 +804,14 @@ class VerifyResetOtpView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        email = request.data.get('email', '').strip()
-        code = request.data.get('code', '').strip()
-
         try:
+            email = request.data.get('email', '').strip()
+            code = request.data.get('code', '').strip()
             user = CustomUser.objects.get(email=email)
         except CustomUser.DoesNotExist:
             return Response({'error': 'Invalid request.'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            return Response({'error': f'Unable to verify reset code: {exc}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         otp = PasswordResetOTP.objects.filter(
             user=user,
@@ -821,14 +831,15 @@ class ResetPasswordView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        email    = request.data.get('email', '').strip()
-        code     = request.data.get('code', '').strip()
-        password = request.data.get('password', '')
-
         try:
+            email = request.data.get('email', '').strip()
+            code = request.data.get('code', '').strip()
+            password = request.data.get('password', '')
             user = CustomUser.objects.get(email=email)
         except CustomUser.DoesNotExist:
             return Response({'error': 'Invalid request.'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            return Response({'error': f'Unable to reset password: {exc}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         otp = PasswordResetOTP.objects.filter(
             user=user,
