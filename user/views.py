@@ -6,7 +6,7 @@ from rest_framework import generics, permissions, status
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import Application, Country, CustomUser, Job, Message, Notification, PasswordResetOTP, UserProfile
+from .models import Application, Country, CustomUser, Job, Message, Notification, PasswordResetOTP, SignupVerification, UserProfile
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 from .serializers import (
@@ -36,12 +36,22 @@ def _create_otp(user, purpose):
     return PasswordResetOTP.objects.create(user=user, purpose=purpose, code=_generate_otp_code())
 
 
-def _send_otp_email(user, subject, body_lines):
+def _create_signup_verification(payload):
+    email = payload["email"].strip().lower()
+    SignupVerification.objects.filter(email=email, is_used=False).delete()
+    return SignupVerification.objects.create(
+        email=email,
+        payload=payload,
+        code=_generate_otp_code(),
+    )
+
+
+def _send_otp_email(recipient_email, subject, body_lines):
     send_mail(
         subject=subject,
         message="\n".join(body_lines),
         from_email=None,
-        recipient_list=[user.email],
+        recipient_list=[recipient_email],
         fail_silently=False,
     )
 
@@ -88,16 +98,17 @@ class UserRegisterView(APIView):
     def post(self, request):
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
-            user = serializer.save()
-            otp = _create_otp(user, PasswordResetOTP.PURPOSE_EMAIL_VERIFICATION)
+            payload = dict(serializer.validated_data)
+            payload.pop("confirm_password", None)
+            verification = _create_signup_verification(payload)
             try:
                 _send_otp_email(
-                    user,
+                    verification.email,
                     "PHINAS JOBS - Email Verification Code",
                     [
-                        f"Hi {user.first_name or user.username},",
+                        f"Hi {payload.get('first_name') or payload.get('username') or verification.email},",
                         "",
-                        f"Your email verification code is: {otp.code}",
+                        f"Your signup verification code is: {verification.code}",
                         "",
                         "This code expires in 10 minutes.",
                         "",
@@ -105,20 +116,110 @@ class UserRegisterView(APIView):
                     ],
                 )
             except Exception as exc:
-                otp.delete()
-                user.delete()
+                verification.delete()
                 return Response(
-                    {"error": f"Account could not be created because the verification email failed: {exc}"},
+                    {"error": f"Could not send the signup verification email: {exc}"},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
             return Response(
                 {
-                    "message": "Account created. A verification code was sent to your email.",
-                    "user": serializer.data,
+                    "message": "Verification code sent. Enter the code to complete signup.",
+                    "email": verification.email,
                 },
                 status=status.HTTP_201_CREATED,
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class VerifySignupView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email", "").strip().lower()
+        code = request.data.get("code", "").strip()
+
+        try:
+            pending = SignupVerification.objects.get(email=email, is_used=False)
+        except SignupVerification.DoesNotExist:
+            return Response({"error": "No pending signup found for that email."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if pending.code != code:
+            return Response({"error": "Invalid verification code."}, status=status.HTTP_400_BAD_REQUEST)
+        if pending.is_expired():
+            return Response({"error": "Verification code has expired. Please request a new one."}, status=status.HTTP_400_BAD_REQUEST)
+
+        payload = dict(pending.payload)
+        payload.pop("confirm_password", None)
+        role = payload.pop("role", "job_seeker")
+        payload.setdefault("company", "")
+        payload.setdefault("company_description", "")
+        payload.setdefault("industry", "")
+        payload["is_email_verified"] = True
+
+        if CustomUser.objects.filter(email=email).exists():
+            return Response({"error": "This email is already in use."}, status=status.HTTP_400_BAD_REQUEST)
+        if CustomUser.objects.filter(username=payload.get("username")).exists():
+            return Response({"error": "This username is already taken."}, status=status.HTTP_400_BAD_REQUEST)
+        if CustomUser.objects.filter(contact=payload.get("contact")).exists():
+            return Response({"error": "This contact number is already in use."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = CustomUser.objects.create_user(**payload)
+        if role == "recruiter":
+            user.is_recruiter = True
+            user.save(update_fields=["is_recruiter"])
+
+        pending.is_used = True
+        pending.save(update_fields=["is_used"])
+        pending.delete()
+
+        return Response(
+            {
+                "message": "Signup verified successfully.",
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "username": user.username,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "is_recruiter": user.is_recruiter,
+                },
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ResendSignupVerificationView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email", "").strip().lower()
+        try:
+            pending = SignupVerification.objects.get(email=email, is_used=False)
+        except SignupVerification.DoesNotExist:
+            return Response({"error": "No pending signup found for that email."}, status=status.HTTP_400_BAD_REQUEST)
+
+        pending.code = _generate_otp_code()
+        pending.save(update_fields=["code"])
+        try:
+            _send_otp_email(
+                pending.email,
+                "PHINAS JOBS - Email Verification Code",
+                [
+                    f"Hi {pending.payload.get('first_name') or pending.payload.get('username') or pending.email},",
+                    "",
+                    f"Your signup verification code is: {pending.code}",
+                    "",
+                    "This code expires in 10 minutes.",
+                    "",
+                    "If you did not create this account, you can ignore this email.",
+                ],
+            )
+        except Exception:
+            return Response(
+                {"error": "We could not resend the verification code. Please check email settings."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        return Response({"message": "Verification code resent to your email."}, status=status.HTTP_200_OK)
 
 
 class UserLoginView(APIView):
