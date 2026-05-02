@@ -47,6 +47,7 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
+    is_email_verified = models.BooleanField(default=False)
     is_recruiter = models.BooleanField(default=False)
     company = models.CharField(max_length=150, blank=True, default='')
     company_description = models.TextField(blank=True, default='')
@@ -117,7 +118,15 @@ class Country(models.Model):
 
 
 class PasswordResetOTP(models.Model):
+    PURPOSE_PASSWORD_RESET = "password_reset"
+    PURPOSE_EMAIL_VERIFICATION = "email_verification"
+    PURPOSE_CHOICES = [
+        (PURPOSE_PASSWORD_RESET, "Password reset"),
+        (PURPOSE_EMAIL_VERIFICATION, "Email verification"),
+    ]
+
     user       = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='otps')
+    purpose    = models.CharField(max_length=32, choices=PURPOSE_CHOICES, default=PURPOSE_PASSWORD_RESET)
     code       = models.CharField(max_length=6)
     created_at = models.DateTimeField(auto_now_add=True)
     is_used    = models.BooleanField(default=False)
@@ -128,7 +137,7 @@ class PasswordResetOTP(models.Model):
         return timezone.now() > self.created_at + timedelta(minutes=10)
 
     def __str__(self):
-        return f"{self.user.email} - {self.code}"
+        return f"{self.user.email} - {self.purpose} - {self.code}"
 
 
 class UserProfile(models.Model):

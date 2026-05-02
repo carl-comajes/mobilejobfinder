@@ -30,7 +30,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
             "id", "first_name", "last_name", "username",
             "email", "contact", "address", "gender",
             "company", "company_description", "industry",
-            "is_staff", "is_active", "is_recruiter",
+            "is_staff", "is_active", "is_email_verified", "is_recruiter",
         ]
         read_only_fields = ["id"]
 
@@ -116,8 +116,9 @@ class UserSerializer(serializers.ModelSerializer):
             "id", "first_name", "middle_name", "last_name", "username",
             "contact", "address", "gender", "email",
             "company", "company_description", "industry",
-            "password", "confirm_password", "role",
+            "password", "confirm_password", "role", "is_email_verified",
         ]
+        read_only_fields = ["id", "is_email_verified"]
 
     def validate(self, data):
         if CustomUser.objects.filter(username=data["username"]).exists():
@@ -141,6 +142,7 @@ class UserSerializer(serializers.ModelSerializer):
         validated_data.setdefault("company", "")
         validated_data.setdefault("company_description", "")
         validated_data.setdefault("industry", "")
+        validated_data["is_email_verified"] = False
         user = CustomUser.objects.create_user(**validated_data)
         if role == "recruiter":
             user.is_recruiter = True

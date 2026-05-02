@@ -27,6 +27,25 @@ def _notify_all_staff(title, message, sender=None):
         _notify(admin, title, message, sender=sender)
 
 
+def _generate_otp_code():
+    return f"{random.randint(100000, 999999)}"
+
+
+def _create_otp(user, purpose):
+    PasswordResetOTP.objects.filter(user=user, purpose=purpose, is_used=False).update(is_used=True)
+    return PasswordResetOTP.objects.create(user=user, purpose=purpose, code=_generate_otp_code())
+
+
+def _send_otp_email(user, subject, body_lines):
+    send_mail(
+        subject=subject,
+        message="\n".join(body_lines),
+        from_email=None,
+        recipient_list=[user.email],
+        fail_silently=False,
+    )
+
+
 class CountryListView(generics.ListAPIView):
     queryset = Country.objects.all()
     serializer_class = CountrySerializer
@@ -69,8 +88,28 @@ class UserRegisterView(APIView):
     def post(self, request):
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save()
-            return Response({"message": "User registered successfully!", "user": serializer.data}, status=status.HTTP_201_CREATED)
+            user = serializer.save()
+            otp = _create_otp(user, PasswordResetOTP.PURPOSE_EMAIL_VERIFICATION)
+            _send_otp_email(
+                user,
+                "PHINAS JOBS - Email Verification Code",
+                [
+                    f"Hi {user.first_name or user.username},",
+                    "",
+                    f"Your email verification code is: {otp.code}",
+                    "",
+                    "This code expires in 10 minutes.",
+                    "",
+                    "If you did not create this account, you can ignore this email.",
+                ],
+            )
+            return Response(
+                {
+                    "message": "Account created. A verification code was sent to your email.",
+                    "user": serializer.data,
+                },
+                status=status.HTTP_201_CREATED,
+            )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -80,6 +119,14 @@ class UserLoginView(APIView):
         password = request.data.get('password')
         user = authenticate(email=email, password=password)
         if user:
+            if not user.is_email_verified:
+                return Response(
+                    {
+                        'error': 'Please verify your email before logging in.',
+                        'requires_verification': True,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             refresh = RefreshToken.for_user(user)
             profile, _ = UserProfile.objects.get_or_create(user=user)
             return Response({
@@ -541,23 +588,110 @@ class ForgotPasswordView(APIView):
         except CustomUser.DoesNotExist:
             return Response({'error': 'No account found with that email.'}, status=status.HTTP_404_NOT_FOUND)
 
-        PasswordResetOTP.objects.filter(user=user, is_used=False).update(is_used=True)
-        code = f"{random.randint(100000, 999999)}"
-        PasswordResetOTP.objects.create(user=user, code=code)
-
-        send_mail(
-            subject='PHINAS JOBS — Password Reset Code',
-            message=(
-                f'Hi {user.first_name},\n\n'
-                f'Your password reset code is: {code}\n\n'
-                f'This code expires in 10 minutes.\n\n'
-                f'If you did not request this, ignore this email.'
-            ),
-            from_email=None,
-            recipient_list=[user.email],
-            fail_silently=False,
+        otp = _create_otp(user, PasswordResetOTP.PURPOSE_PASSWORD_RESET)
+        _send_otp_email(
+            user,
+            "PHINAS JOBS - Password Reset Code",
+            [
+                f"Hi {user.first_name or user.username},",
+                "",
+                f"Your password reset code is: {otp.code}",
+                "",
+                "This code expires in 10 minutes.",
+                "",
+                "If you did not request this, ignore this email.",
+            ],
         )
         return Response({'message': 'OTP sent to your email.'}, status=status.HTTP_200_OK)
+
+
+class VerifyEmailView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email', '').strip()
+        code = request.data.get('code', '').strip()
+
+        try:
+            user = CustomUser.objects.get(email=email)
+        except CustomUser.DoesNotExist:
+            return Response({'error': 'Invalid request.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if user.is_email_verified:
+            return Response({'message': 'Email is already verified.'}, status=status.HTTP_200_OK)
+
+        otp = PasswordResetOTP.objects.filter(
+            user=user,
+            purpose=PasswordResetOTP.PURPOSE_EMAIL_VERIFICATION,
+            code=code,
+            is_used=False,
+        ).order_by('-created_at').first()
+        if not otp:
+            return Response({'error': 'Invalid or already used verification code.'}, status=status.HTTP_400_BAD_REQUEST)
+        if otp.is_expired():
+            return Response({'error': 'Verification code has expired. Please request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.is_email_verified = True
+        user.save(update_fields=['is_email_verified'])
+        otp.is_used = True
+        otp.save(update_fields=['is_used'])
+        return Response({'message': 'Email verified successfully.'}, status=status.HTTP_200_OK)
+
+
+class ResendEmailVerificationView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email', '').strip()
+        try:
+            user = CustomUser.objects.get(email=email)
+        except CustomUser.DoesNotExist:
+            return Response({'error': 'Invalid request.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if user.is_email_verified:
+            return Response({'message': 'Email is already verified.'}, status=status.HTTP_200_OK)
+
+        otp = _create_otp(user, PasswordResetOTP.PURPOSE_EMAIL_VERIFICATION)
+        _send_otp_email(
+            user,
+            "PHINAS JOBS - Email Verification Code",
+            [
+                f"Hi {user.first_name or user.username},",
+                "",
+                f"Your email verification code is: {otp.code}",
+                "",
+                "This code expires in 10 minutes.",
+                "",
+                "If you did not create this account, you can ignore this email.",
+            ],
+        )
+        return Response({'message': 'Verification code resent to your email.'}, status=status.HTTP_200_OK)
+
+
+class VerifyResetOtpView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email', '').strip()
+        code = request.data.get('code', '').strip()
+
+        try:
+            user = CustomUser.objects.get(email=email)
+        except CustomUser.DoesNotExist:
+            return Response({'error': 'Invalid request.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        otp = PasswordResetOTP.objects.filter(
+            user=user,
+            purpose=PasswordResetOTP.PURPOSE_PASSWORD_RESET,
+            code=code,
+            is_used=False,
+        ).order_by('-created_at').first()
+        if not otp:
+            return Response({'error': 'Invalid or already used OTP.'}, status=status.HTTP_400_BAD_REQUEST)
+        if otp.is_expired():
+            return Response({'error': 'OTP has expired. Please request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({'message': 'OTP verified successfully.'}, status=status.HTTP_200_OK)
 
 
 class ResetPasswordView(APIView):
@@ -573,7 +707,12 @@ class ResetPasswordView(APIView):
         except CustomUser.DoesNotExist:
             return Response({'error': 'Invalid request.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        otp = PasswordResetOTP.objects.filter(user=user, code=code, is_used=False).order_by('-created_at').first()
+        otp = PasswordResetOTP.objects.filter(
+            user=user,
+            purpose=PasswordResetOTP.PURPOSE_PASSWORD_RESET,
+            code=code,
+            is_used=False,
+        ).order_by('-created_at').first()
         if not otp:
             return Response({'error': 'Invalid or already used OTP.'}, status=status.HTTP_400_BAD_REQUEST)
         if otp.is_expired():
