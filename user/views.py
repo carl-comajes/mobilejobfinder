@@ -90,19 +90,27 @@ class UserRegisterView(APIView):
         if serializer.is_valid():
             user = serializer.save()
             otp = _create_otp(user, PasswordResetOTP.PURPOSE_EMAIL_VERIFICATION)
-            _send_otp_email(
-                user,
-                "PHINAS JOBS - Email Verification Code",
-                [
-                    f"Hi {user.first_name or user.username},",
-                    "",
-                    f"Your email verification code is: {otp.code}",
-                    "",
-                    "This code expires in 10 minutes.",
-                    "",
-                    "If you did not create this account, you can ignore this email.",
-                ],
-            )
+            try:
+                _send_otp_email(
+                    user,
+                    "PHINAS JOBS - Email Verification Code",
+                    [
+                        f"Hi {user.first_name or user.username},",
+                        "",
+                        f"Your email verification code is: {otp.code}",
+                        "",
+                        "This code expires in 10 minutes.",
+                        "",
+                        "If you did not create this account, you can ignore this email.",
+                    ],
+                )
+            except Exception as exc:
+                otp.delete()
+                user.delete()
+                return Response(
+                    {"error": f"Account could not be created because the verification email failed: {exc}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
             return Response(
                 {
                     "message": "Account created. A verification code was sent to your email.",
@@ -589,19 +597,26 @@ class ForgotPasswordView(APIView):
             return Response({'error': 'No account found with that email.'}, status=status.HTTP_404_NOT_FOUND)
 
         otp = _create_otp(user, PasswordResetOTP.PURPOSE_PASSWORD_RESET)
-        _send_otp_email(
-            user,
-            "PHINAS JOBS - Password Reset Code",
-            [
-                f"Hi {user.first_name or user.username},",
-                "",
-                f"Your password reset code is: {otp.code}",
-                "",
-                "This code expires in 10 minutes.",
-                "",
-                "If you did not request this, ignore this email.",
-            ],
-        )
+        try:
+            _send_otp_email(
+                user,
+                "PHINAS JOBS - Password Reset Code",
+                [
+                    f"Hi {user.first_name or user.username},",
+                    "",
+                    f"Your password reset code is: {otp.code}",
+                    "",
+                    "This code expires in 10 minutes.",
+                    "",
+                    "If you did not request this, ignore this email.",
+                ],
+            )
+        except Exception:
+            otp.delete()
+            return Response(
+                {'error': 'We could not send the reset code. Please check email settings.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         return Response({'message': 'OTP sent to your email.'}, status=status.HTTP_200_OK)
 
 
@@ -652,19 +667,26 @@ class ResendEmailVerificationView(APIView):
             return Response({'message': 'Email is already verified.'}, status=status.HTTP_200_OK)
 
         otp = _create_otp(user, PasswordResetOTP.PURPOSE_EMAIL_VERIFICATION)
-        _send_otp_email(
-            user,
-            "PHINAS JOBS - Email Verification Code",
-            [
-                f"Hi {user.first_name or user.username},",
-                "",
-                f"Your email verification code is: {otp.code}",
-                "",
-                "This code expires in 10 minutes.",
-                "",
-                "If you did not create this account, you can ignore this email.",
-            ],
-        )
+        try:
+            _send_otp_email(
+                user,
+                "PHINAS JOBS - Email Verification Code",
+                [
+                    f"Hi {user.first_name or user.username},",
+                    "",
+                    f"Your email verification code is: {otp.code}",
+                    "",
+                    "This code expires in 10 minutes.",
+                    "",
+                    "If you did not create this account, you can ignore this email.",
+                ],
+            )
+        except Exception:
+            otp.delete()
+            return Response(
+                {'error': 'We could not resend the verification code. Please check email settings.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         return Response({'message': 'Verification code resent to your email.'}, status=status.HTTP_200_OK)
 
 
