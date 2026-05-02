@@ -183,10 +183,13 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 # Gmail SMTP
-EMAIL_BACKEND = (
-    'django.core.mail.backends.console.EmailBackend'
-    if DEBUG
-    else 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_BACKEND = config(
+    'EMAIL_BACKEND',
+    default=(
+        'django.core.mail.backends.smtp.EmailBackend'
+        if config('MAILER_SMTP_USER', default='') and config('MAILER_SMTP_PASSWORD', default='')
+        else 'django.core.mail.backends.console.EmailBackend'
+    ),
 )
 EMAIL_HOST = config('MAILER_SMTP_HOST', default='smtp-relay.brevo.com')
 EMAIL_PORT = config('MAILER_SMTP_PORT', default=587, cast=int)
@@ -196,4 +199,4 @@ EMAIL_HOST_USER = config('MAILER_SMTP_USER', default='')
 EMAIL_HOST_PASSWORD = config('MAILER_SMTP_PASSWORD', default='')
 MAILER_FROM_EMAIL = config('MAILER_FROM_EMAIL', default=EMAIL_HOST_USER)
 MAILER_FROM_NAME = config('MAILER_FROM_NAME', default='FilCare Clinic')
-DEFAULT_FROM_EMAIL = formataddr((MAILER_FROM_NAME, MAILER_FROM_EMAIL))
+DEFAULT_FROM_EMAIL = formataddr((MAILER_FROM_NAME, MAILER_FROM_EMAIL or EMAIL_HOST_USER or 'no-reply@example.com'))
