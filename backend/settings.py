@@ -200,9 +200,7 @@ EMAIL_HOST_PASSWORD = config('MAILER_SMTP_PASSWORD', default='')
 MAILER_FROM_NAME = config('MAILER_FROM_NAME', default='Job Finder')
 MAILER_FROM_EMAIL = config('MAILER_FROM_EMAIL', default='').strip()
 
-# Brevo is happiest when the sender matches a verified Brevo sender or the SMTP user.
-_configured_from_email = MAILER_FROM_EMAIL or EMAIL_HOST_USER or 'no-reply@example.com'
-if 'brevo' in EMAIL_HOST.lower() and EMAIL_HOST_USER:
-    _configured_from_email = EMAIL_HOST_USER
-
-DEFAULT_FROM_EMAIL = formataddr((MAILER_FROM_NAME, _configured_from_email))
+# Prefer the verified sender address you configured in Brevo.
+DEFAULT_FROM_EMAIL = formataddr(
+    (MAILER_FROM_NAME, MAILER_FROM_EMAIL or EMAIL_HOST_USER or 'no-reply@example.com')
+)
