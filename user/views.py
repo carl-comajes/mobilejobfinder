@@ -695,7 +695,7 @@ class ForgotPasswordView(APIView):
             email = request.data.get('email', '').strip()
             if not email:
                 return Response({'error': 'Please enter your email.'}, status=status.HTTP_400_BAD_REQUEST)
-            user = CustomUser.objects.get(email=email)
+            user = CustomUser.objects.get(email__iexact=email)
         except CustomUser.DoesNotExist:
             return Response({'error': 'No account found with that email.'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as exc:
@@ -709,7 +709,7 @@ class ForgotPasswordView(APIView):
         otp = _create_otp(user, PasswordResetOTP.PURPOSE_PASSWORD_RESET)
         try:
             _send_otp_email(
-                user,
+                user.email,
                 "PHINAS JOBS - Password Reset Code",
                 [
                     f"Hi {user.first_name or user.username},",
@@ -738,7 +738,7 @@ class VerifyEmailView(APIView):
         code = request.data.get('code', '').strip()
 
         try:
-            user = CustomUser.objects.get(email=email)
+            user = CustomUser.objects.get(email__iexact=email)
         except CustomUser.DoesNotExist:
             return Response({'error': 'Invalid request.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -769,7 +769,7 @@ class ResendEmailVerificationView(APIView):
     def post(self, request):
         email = request.data.get('email', '').strip()
         try:
-            user = CustomUser.objects.get(email=email)
+            user = CustomUser.objects.get(email__iexact=email)
         except CustomUser.DoesNotExist:
             return Response({'error': 'Invalid request.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -779,7 +779,7 @@ class ResendEmailVerificationView(APIView):
         otp = _create_otp(user, PasswordResetOTP.PURPOSE_EMAIL_VERIFICATION)
         try:
             _send_otp_email(
-                user,
+                user.email,
                 "PHINAS JOBS - Email Verification Code",
                 [
                     f"Hi {user.first_name or user.username},",
@@ -807,7 +807,7 @@ class VerifyResetOtpView(APIView):
         try:
             email = request.data.get('email', '').strip()
             code = request.data.get('code', '').strip()
-            user = CustomUser.objects.get(email=email)
+            user = CustomUser.objects.get(email__iexact=email)
         except CustomUser.DoesNotExist:
             return Response({'error': 'Invalid request.'}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as exc:
@@ -835,7 +835,7 @@ class ResetPasswordView(APIView):
             email = request.data.get('email', '').strip()
             code = request.data.get('code', '').strip()
             password = request.data.get('password', '')
-            user = CustomUser.objects.get(email=email)
+            user = CustomUser.objects.get(email__iexact=email)
         except CustomUser.DoesNotExist:
             return Response({'error': 'Invalid request.'}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as exc:
