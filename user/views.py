@@ -1,3 +1,4 @@
+import logging
 import random
 import re
 from django.conf import settings
@@ -16,6 +17,8 @@ from .serializers import (
     JobSerializer, MessageSerializer, NotificationSerializer, ProfileSerializer,
     RecruiterSerializer, UserProfileSerializer, UserSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _notify(recipient, title, message, sender=None):
@@ -49,13 +52,35 @@ def _create_signup_verification(payload):
 
 
 def _send_otp_email(recipient_email, subject, body_lines):
-    send_mail(
-        subject=subject,
-        message="\n".join(body_lines),
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[recipient_email],
-        fail_silently=False,
-    )
+    message = "\n".join(body_lines)
+    sender_candidates = []
+    for candidate in (
+        getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        getattr(settings, "EMAIL_HOST_USER", None),
+        getattr(settings, "MAILER_FROM_EMAIL", None),
+        None,
+    ):
+        if candidate and candidate not in sender_candidates:
+            sender_candidates.append(candidate)
+
+    last_error = None
+    for sender in sender_candidates:
+        try:
+            sent = send_mail(
+                subject=subject,
+                message=message,
+                from_email=sender,
+                recipient_list=[recipient_email],
+                fail_silently=False,
+            )
+            if sent:
+                return sender
+            last_error = RuntimeError("Email backend reported that no message was sent.")
+        except Exception as exc:
+            last_error = exc
+            logger.exception("Unable to send OTP email using sender %r", sender or "<default>")
+
+    raise RuntimeError(f"Email delivery failed: {last_error}") from last_error
 
 
 class CountryListView(generics.ListAPIView):
@@ -130,7 +155,6 @@ class UserRegisterView(APIView):
                     ],
                 )
             except Exception as exc:
-                verification.delete()
                 return Response(
                     {"error": f"Could not send the signup verification email: {exc}"},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -212,8 +236,7 @@ class ResendSignupVerificationView(APIView):
         except SignupVerification.DoesNotExist:
             return Response({"error": "No pending signup found for that email."}, status=status.HTTP_400_BAD_REQUEST)
 
-        pending.code = _generate_otp_code()
-        pending.save(update_fields=["code"])
+        new_code = _generate_otp_code()
         try:
             _send_otp_email(
                 pending.email,
@@ -221,7 +244,7 @@ class ResendSignupVerificationView(APIView):
                 [
                     f"Hi {pending.payload.get('first_name') or pending.payload.get('username') or pending.email},",
                     "",
-                    f"Your signup verification code is: {pending.code}",
+                    f"Your signup verification code is: {new_code}",
                     "",
                     "This code expires in 10 minutes.",
                     "",
@@ -233,6 +256,8 @@ class ResendSignupVerificationView(APIView):
                 {"error": "We could not resend the verification code. Please check email settings."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+        pending.code = new_code
+        pending.save(update_fields=["code"])
         return Response({"message": "Verification code resent to your email."}, status=status.HTTP_200_OK)
 
 
