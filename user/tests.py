@@ -93,6 +93,30 @@ class SignupVerificationFlowTests(APITestCase):
         mock_send_mail.assert_called_once()
         self.assertEqual(mock_send_mail.call_args.kwargs["recipient_list"], ["jane.doe@example.com"])
 
+    @patch("user.views.send_mail", side_effect=RuntimeError("SMTP failed"))
+    def test_register_falls_back_in_debug_when_email_delivery_fails(self, mock_send_mail):
+        response = self.client.post(
+            reverse("user"),
+            {
+                "first_name": "Jane",
+                "last_name": "Doe",
+                "username": "janedoe2",
+                "email": "jane2.doe@example.com",
+                "contact": "09170000002",
+                "address": "Test Address",
+                "gender": "Female",
+                "password": "StrongPass123!",
+                "confirm_password": "StrongPass123!",
+                "role": "job_seeker",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["email"], "jane2.doe@example.com")
+        self.assertIn("verification_code", response.data)
+        self.assertTrue(mock_send_mail.called)
+
     @patch("user.views.send_mail")
     def test_resend_signup_verification_uses_case_insensitive_email_lookup_and_sends_to_email_address(self, mock_send_mail):
         pending = SignupVerification.objects.create(

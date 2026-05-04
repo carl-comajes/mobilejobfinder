@@ -123,8 +123,11 @@ class UserProfileView(APIView):
 
 class UserRegisterView(APIView):
     def post(self, request):
-        serializer = UserSerializer(data=request.data)
-        if serializer.is_valid():
+        try:
+            serializer = UserSerializer(data=request.data)
+            if not serializer.is_valid():
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
             payload = dict(serializer.validated_data)
             payload.pop("confirm_password", None)
             try:
@@ -133,11 +136,6 @@ class UserRegisterView(APIView):
                 return Response(
                     {"email": "A verification is already pending for this email. Please resend the code."},
                     status=status.HTTP_400_BAD_REQUEST,
-                )
-            except Exception as exc:
-                return Response(
-                    {"error": f"Could not start signup verification: {exc}"},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
 
             try:
@@ -155,10 +153,22 @@ class UserRegisterView(APIView):
                     ],
                 )
             except Exception as exc:
+                logger.exception("Signup verification email failed for %s", verification.email)
+                if settings.DEBUG:
+                    return Response(
+                        {
+                            "message": "Verification code created, but email delivery failed in debug mode.",
+                            "email": verification.email,
+                            "verification_code": verification.code,
+                            "warning": str(exc),
+                        },
+                        status=status.HTTP_201_CREATED,
+                    )
                 return Response(
                     {"error": f"Could not send the signup verification email: {exc}"},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
+
             return Response(
                 {
                     "message": "Verification code sent. Enter the code to complete signup.",
@@ -166,7 +176,12 @@ class UserRegisterView(APIView):
                 },
                 status=status.HTTP_201_CREATED,
             )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            logger.exception("Unexpected error during user signup")
+            return Response(
+                {"error": f"Could not start signup verification: {exc}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class VerifySignupView(APIView):
@@ -230,11 +245,17 @@ class ResendSignupVerificationView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        email = request.data.get("email", "").strip().lower()
         try:
+            email = request.data.get("email", "").strip().lower()
             pending = SignupVerification.objects.get(email=email, is_used=False)
         except SignupVerification.DoesNotExist:
             return Response({"error": "No pending signup found for that email."}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            logger.exception("Unexpected error while locating pending signup")
+            return Response(
+                {"error": f"Could not resend the verification code: {exc}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         new_code = _generate_otp_code()
         try:
@@ -252,6 +273,18 @@ class ResendSignupVerificationView(APIView):
                 ],
             )
         except Exception:
+            logger.exception("Resend signup verification email failed for %s", pending.email)
+            if settings.DEBUG:
+                pending.code = new_code
+                pending.save(update_fields=["code"])
+                return Response(
+                    {
+                        "message": "Verification code regenerated, but email delivery failed in debug mode.",
+                        "email": pending.email,
+                        "verification_code": new_code,
+                    },
+                    status=status.HTTP_200_OK,
+                )
             return Response(
                 {"error": "We could not resend the verification code. Please check email settings."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
