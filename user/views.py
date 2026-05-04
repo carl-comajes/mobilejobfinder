@@ -2,6 +2,7 @@ import random
 import re
 from django.conf import settings
 from django.core.mail import send_mail
+from django.db import IntegrityError
 from django.db.models import Q
 from rest_framework import generics, permissions, status
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -101,7 +102,19 @@ class UserRegisterView(APIView):
         if serializer.is_valid():
             payload = dict(serializer.validated_data)
             payload.pop("confirm_password", None)
-            verification = _create_signup_verification(payload)
+            try:
+                verification = _create_signup_verification(payload)
+            except IntegrityError:
+                return Response(
+                    {"email": "A verification is already pending for this email. Please resend the code."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            except Exception as exc:
+                return Response(
+                    {"error": f"Could not start signup verification: {exc}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
             try:
                 _send_otp_email(
                     verification.email,

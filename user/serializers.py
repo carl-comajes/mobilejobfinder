@@ -119,6 +119,9 @@ class UserSerializer(serializers.ModelSerializer):
             "password", "confirm_password", "role", "is_email_verified",
         ]
         read_only_fields = ["id", "is_email_verified"]
+        extra_kwargs = {
+            "contact": {"validators": []},
+        }
 
     def validate(self, data):
         if CustomUser.objects.filter(username=data["username"]).exists():
@@ -135,6 +138,14 @@ class UserSerializer(serializers.ModelSerializer):
             if missing:
                 raise serializers.ValidationError(missing)
         return data
+
+    def validate_contact(self, value):
+        qs = CustomUser.objects.filter(contact=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("This contact number is already in use.")
+        return value
 
     def create(self, validated_data):
         validated_data.pop("confirm_password")

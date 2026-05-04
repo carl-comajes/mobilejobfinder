@@ -37,6 +37,38 @@ class PasswordResetFlowTests(APITestCase):
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
 class SignupVerificationFlowTests(APITestCase):
+    def test_register_rejects_duplicate_contact_before_sending_email(self):
+        CustomUser.objects.create_user(
+            email="existing@example.com",
+            username="existinguser",
+            password="StrongPass123!",
+            first_name="Existing",
+            last_name="User",
+            contact="09170000009",
+            address="Test Address",
+            gender="Male",
+        )
+
+        response = self.client.post(
+            reverse("user"),
+            {
+                "first_name": "Jane",
+                "last_name": "Doe",
+                "username": "janedoe",
+                "email": "jane.doe@example.com",
+                "contact": "09170000009",
+                "address": "Test Address",
+                "gender": "Female",
+                "password": "StrongPass123!",
+                "confirm_password": "StrongPass123!",
+                "role": "job_seeker",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["contact"][0], "This contact number is already in use.")
+
     @patch("user.views.send_mail")
     def test_register_sends_verification_email_and_normalizes_email(self, mock_send_mail):
         response = self.client.post(
