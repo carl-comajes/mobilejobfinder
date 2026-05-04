@@ -182,15 +182,11 @@ STORAGES = {
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# Email delivery
-EMAIL_BACKEND = config(
-    'EMAIL_BACKEND',
-    default=(
-        'django.core.mail.backends.smtp.EmailBackend'
-        if config('MAILER_SMTP_USER', default='') and config('MAILER_SMTP_PASSWORD', default='')
-        else 'django.core.mail.backends.console.EmailBackend'
-    ),
-)
+# Brevo API key (used for transactional email sending)
+BREVO_API_KEY = config('BREVO_API_KEY', default='')
+
+# SMTP settings (kept for reference/fallback)
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = config('MAILER_SMTP_HOST', default='smtp-relay.brevo.com')
 EMAIL_PORT = config('MAILER_SMTP_PORT', default=587, cast=int)
 EMAIL_USE_TLS = _bool_setting('MAILER_SMTP_USE_TLS', True)
@@ -199,10 +195,4 @@ EMAIL_HOST_USER = config('MAILER_SMTP_USER', default='')
 EMAIL_HOST_PASSWORD = config('MAILER_SMTP_PASSWORD', default='')
 MAILER_FROM_NAME = config('MAILER_FROM_NAME', default='Job Finder')
 MAILER_FROM_EMAIL = config('MAILER_FROM_EMAIL', default='').strip()
-# Use the verified sender email (MAILER_FROM_EMAIL) first, then fall back to SMTP user
-MAILER_FROM_ADDRESS = MAILER_FROM_EMAIL or EMAIL_HOST_USER or 'no-reply@example.com'
-
-# Prefer the explicitly configured sender address so relays like Brevo/Gmail can accept it.
-DEFAULT_FROM_EMAIL = formataddr(
-    (MAILER_FROM_NAME, MAILER_FROM_ADDRESS)
-)
+DEFAULT_FROM_EMAIL = formataddr((MAILER_FROM_NAME, MAILER_FROM_EMAIL or 'no-reply@example.com'))

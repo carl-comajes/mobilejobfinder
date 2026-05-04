@@ -1,8 +1,8 @@
 import logging
 import random
 import re
+import requests
 from django.conf import settings
-from django.core.mail import send_mail
 from django.db import IntegrityError
 from django.db.models import Q
 from rest_framework import generics, permissions, status
@@ -52,35 +52,33 @@ def _create_signup_verification(payload):
 
 
 def _send_otp_email(recipient_email, subject, body_lines):
-    message = "\n".join(body_lines)
-    sender_candidates = []
-    for candidate in (
-        getattr(settings, "DEFAULT_FROM_EMAIL", None),
-        getattr(settings, "EMAIL_HOST_USER", None),
-        getattr(settings, "MAILER_FROM_EMAIL", None),
-        None,
-    ):
-        if candidate and candidate not in sender_candidates:
-            sender_candidates.append(candidate)
+    api_key = getattr(settings, 'BREVO_API_KEY', '')
+    if not api_key:
+        raise RuntimeError('BREVO_API_KEY is not configured.')
 
-    last_error = None
-    for sender in sender_candidates:
-        try:
-            sent = send_mail(
-                subject=subject,
-                message=message,
-                from_email=sender,
-                recipient_list=[recipient_email],
-                fail_silently=False,
-            )
-            if sent:
-                return sender
-            last_error = RuntimeError("Email backend reported that no message was sent.")
-        except Exception as exc:
-            last_error = exc
-            logger.exception("Unable to send OTP email using sender %r", sender or "<default>")
+    from_email = getattr(settings, 'MAILER_FROM_EMAIL', '') or 'no-reply@example.com'
+    from_name = getattr(settings, 'MAILER_FROM_NAME', 'Job Finder')
+    text_content = '\n'.join(body_lines)
 
-    raise RuntimeError(f"Email delivery failed: {last_error}") from last_error
+    response = requests.post(
+        'https://api.brevo.com/v3/smtp/email',
+        headers={
+            'api-key': api_key,
+            'Content-Type': 'application/json',
+        },
+        json={
+            'sender': {'name': from_name, 'email': from_email},
+            'to': [{'email': recipient_email}],
+            'subject': subject,
+            'textContent': text_content,
+        },
+        timeout=15,
+    )
+
+    if not response.ok:
+        raise RuntimeError(f'Brevo API error {response.status_code}: {response.text}')
+
+    return from_email
 
 
 class CountryListView(generics.ListAPIView):
