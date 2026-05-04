@@ -139,6 +139,7 @@ class UserSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop("confirm_password")
         role = validated_data.pop("role", "job_seeker")
+        validated_data["email"] = validated_data["email"].strip().lower()
         validated_data.setdefault("company", "")
         validated_data.setdefault("company_description", "")
         validated_data.setdefault("industry", "")

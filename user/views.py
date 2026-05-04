@@ -1,5 +1,6 @@
 import random
 import re
+from django.conf import settings
 from django.core.mail import send_mail
 from django.db.models import Q
 from rest_framework import generics, permissions, status
@@ -50,7 +51,7 @@ def _send_otp_email(recipient_email, subject, body_lines):
     send_mail(
         subject=subject,
         message="\n".join(body_lines),
-        from_email=None,
+        from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[recipient_email],
         fail_silently=False,
     )

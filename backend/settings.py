@@ -197,6 +197,12 @@ EMAIL_USE_TLS = _bool_setting('MAILER_SMTP_USE_TLS', True)
 EMAIL_USE_SSL = _bool_setting('MAILER_SMTP_USE_SSL', False)
 EMAIL_HOST_USER = config('MAILER_SMTP_USER', default='')
 EMAIL_HOST_PASSWORD = config('MAILER_SMTP_PASSWORD', default='')
-MAILER_FROM_EMAIL = config('MAILER_FROM_EMAIL', default=EMAIL_HOST_USER)
-MAILER_FROM_NAME = config('MAILER_FROM_NAME', default='FilCare Clinic')
-DEFAULT_FROM_EMAIL = formataddr((MAILER_FROM_NAME, MAILER_FROM_EMAIL or EMAIL_HOST_USER or 'no-reply@example.com'))
+MAILER_FROM_NAME = config('MAILER_FROM_NAME', default='Job Finder')
+MAILER_FROM_EMAIL = config('MAILER_FROM_EMAIL', default='').strip()
+
+# Brevo is happiest when the sender matches a verified Brevo sender or the SMTP user.
+_configured_from_email = MAILER_FROM_EMAIL or EMAIL_HOST_USER or 'no-reply@example.com'
+if 'brevo' in EMAIL_HOST.lower() and EMAIL_HOST_USER:
+    _configured_from_email = EMAIL_HOST_USER
+
+DEFAULT_FROM_EMAIL = formataddr((MAILER_FROM_NAME, _configured_from_email))
